@@ -1,0 +1,161 @@
+---
+title: "Practical Machine Learning model on Weight Lifting Exercise Dataset"
+author: "Rodrigo Parizotto"
+date: "Dec 22th, 2018"
+output: 
+  html_document: 
+    keep_md: yes
+    self_contained: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = TRUE, echo = TRUE)
+```
+
+## Introduction
+
+The goal of this project is to create a machine learning model and predict the manner in which a few people did Weight Lifting Exercise. The output variable is "Classe". 
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Load data
+Let's load libraries and datasets already downloaded on local path
+```{r pml datasets load}
+suppressMessages(library(dplyr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(caret))
+#if (!file.exists("pml-training.csv")) setwd('C:/POC/Git/Practical_ML_PeerAssessment1') #setting according to user environment
+dftrain_orig <- read.table("pml-training.csv", sep=',',quote='"', header = TRUE)
+dftest_orig <- read.table("pml-testing.csv", sep=',',quote='"', header = TRUE)
+
+```
+
+
+### Good Columns Identification
+
+Let's check the near zero variance on columns and remove the columns. They might cause issues on training the models.
+```{r}
+nsv <- nearZeroVar(dftrain_orig[,names(dftrain_orig) != 'classe'],saveMetrics=TRUE)
+nsv[nsv$nzv == TRUE,]
+```
+
+Selecting only the good columns 
+```{r}
+df0 <- dftrain_orig %>% 
+  select(num_window:total_accel_belt, gyros_belt_x:total_accel_arm, gyros_arm_x:magnet_arm_z, roll_dumbbell:yaw_dumbbell, total_accel_dumbbell, gyros_dumbbell_x:yaw_forearm, total_accel_forearm, gyros_forearm_x:magnet_forearm_z, classe)
+
+columns <- names(df0)
+columns <- columns[! columns %in% c('classe')]
+
+dftest20samples <- dftest_orig %>%
+  select(columns)
+```
+
+Checking nearZeroVar again
+```{r}
+nsv <- nearZeroVar(df0[,names(df0) != 'classe'],saveMetrics=TRUE)
+nsv[nsv$nzv == TRUE,]
+```
+The results of nearZeroVar function applied to df0 confirm that we removed bad columns.
+
+## Data spliting
+Let's use 80% of data for training the model and 20% of data to calculate the expected out of sample error
+```{r}
+set.seed(12)
+train_index = createDataPartition(df0$classe, p=0.8, list = FALSE)
+df_train <- df0[train_index,]
+df_test <- df0[-train_index,]
+```
+
+
+## Exploratory analysis
+
+Simple plot to check the distribution
+
+```{r classe, echo=FALSE}
+plot(x= dftrain_orig$user_name, y=dftrain_orig$classe)
+```
+
+
+## Model 
+Let's use trainControl function to setup Cross Validation (CV). The preProcess funtion will center, scale and fill empty models before training the model. Following 3 different models: rpart, svmLinear, gbm
+```{r}
+#cvCtrl <- trainControl(method = "repeatedcv", repeats = 3)
+#cvCtrl <- trainControl(method = "cv")
+cvCtrl <- trainControl(method = "cv",
+                       number = 5 ,
+                       verboseIter = FALSE
+                       )
+set.seed(12)
+model1 <- train(classe ~ ., data = df_train,
+                preProcess=c("center","scale","knnImpute"),
+                method = "rpart",
+                tuneLength = 30,
+                trControl = cvCtrl,
+                na.action = na.pass)
+
+set.seed(12)
+model2 <- train(classe ~ ., data = df_train,
+                preProcess=c("center","scale","knnImpute"),
+                method = "svmLinear",
+                tuneLength = 10,
+                trControl = cvCtrl,
+                na.action = na.pass)
+
+set.seed(12)
+model3 <- train(classe ~ ., data = df_train, 
+                 preProcess=c("center","scale","knnImpute"),
+                 method = "gbm", 
+                 trControl = cvCtrl,
+                 ## This last option is actually one
+                 ## for gbm() that passes through
+                 verbose = FALSE)
+```
+## Prediction
+Model 1 Results
+```{r}
+pred1 <- predict(model1, newdata = df_test)
+cf1 <- confusionMatrix(df_test$classe, pred1)
+cf1
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+Model 2 Results
+```{r}
+pred2 <- predict(model2, newdata = df_test)
+cf2 <- confusionMatrix(df_test$classe, pred2)
+cf2
+```
+
+Model 3 Results
+```{r}
+pred3 <- predict(model3, newdata = df_test)
+cf3 <- confusionMatrix(df_test$classe, pred3)
+cf3
+```
+
+```{r eval=FALSE, include=FALSE}
+## Combining predictors
+#predDF <- data.frame(pred1, pred2, pred3, classe = df_test$classe)
+#combModFit <- train(classe ~., method="lm", data=predDF)
+#combPred <- predict(combModFit,predDF)
+#cfcomb <- confusionMatrix(df_test$classe, combPred)
+```
+
+## Conclusion
+Model 3 shows the best Expected Accuracy, around 98% on testing data (20% split).
+Let's use the Model 3 to predict the 20 samples in dftest20samples.
+
+```{r}
+predict20 <- predict(model3, newdata = dftest20samples)
+data.frame(sample=1:20,classe=predict20)
+```
+
+#
